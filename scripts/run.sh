@@ -4,7 +4,28 @@ if [[ -n "${JAVA_HEAP_SIZE}" ]]; then
     echo "webServerMaxHeapSize=${JAVA_HEAP_SIZE}M" >> $CS_ROOT/config/cycle_server.properties
 fi
 
-tail $CS_ROOT/config/cycle_server.properties
+# Setup SSH keypair for Azure CycleCloud
+CS_USER=cycle_server
+SSH_DIR=$CS_ROOT/.ssh
+mkdir $SSH_DIR
+
+SSH_KEYNAME="cyclecloud.pem"
+ssh-keygen -t rsa -q -f $SSH_DIR/${SSH_KEYNAME} -N ""
+chmod 600 $SSH_DIR/${SSH_KEYNAME}
+chown ${CS_USER}:${CS_USER} -R $SSH_DIR
+echo "Private Key for admin access to nodes.  Retain for cyclecloud cli and ssh access."
+cat $SSH_DIR/${SSH_KEYNAME}
+
+# Setup the azure storage share for logs and backups
+if [ -d "$BACKUPS_DIRECTORY" ]; then
+  mv $CS_ROOT/logs $BACKUPS_DIRECTORY/
+  ln -s $BACKUPS_DIRECTORY/logs $CS_ROOT/
+  chown cycle_server:cycle_server $CS_ROOT/logs
+  mv $CS_ROOT/data/backups $BACKUPS_DIRECTORY/ || true
+  mkdir $BACKUPS_DIRECTORY/backups || true
+  ln -s $BACKUPS_DIRECTORY/backups $CS_ROOT/data/
+  chown cycle_server:cycle_server $CS_ROOT/data/backups
+fi
 
 $CS_ROOT/cycle_server start --wait
 
@@ -63,17 +84,6 @@ EOF
     rm -f /tmp/initial_data.json
 
 fi
-
-CS_USER=cycle_server
-SSH_DIR=$CS_ROOT/.ssh
-mkdir $SSH_DIR
-
-SSH_KEYNAME="cyclecloud.pem"
-ssh-keygen -t rsa -q -f $SSH_DIR/${SSH_KEYNAME} -N ""
-chmod 600 $SSH_DIR/${SSH_KEYNAME}
-chown ${CS_USER}:${CS_USER} -R $SSH_DIR
-echo "Private Key for admin access to nodes.  Retain for cyclecloud cli and ssh access."
-cat $SSH_DIR/${SSH_KEYNAME}
 
 while true
 do

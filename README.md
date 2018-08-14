@@ -1,6 +1,5 @@
 # CycleCloud container distribution
 
----
 ## Prerequisites
 
 A CycleCloud linux `deb` package is required to build a container image.  This can
@@ -20,8 +19,8 @@ this project, run:
 
 The build process can utilize custom:
 
-  - Custom CycleCloud components by adding them to a `./components` directory.
-  - Custom CycleCloud records by adding them to a `./records` directory.
+- Custom CycleCloud components by adding them to a `./components` directory.
+- Custom CycleCloud records by adding them to a `./records` directory.
 
 The image build process will configure the installation with these resources
 included. 
@@ -37,10 +36,12 @@ To build a customized AzureCycleCloud container image:
 ### Runtime
 
 #### Notice
-_If the CycleCloud service fails the container process will terminate and all 
-cluster data will be lost. No persistent storage options are currently available in this project._
 
-The container runs the web application available for http (80) and http (8443). 
+_If the CycleCloud service fails the container process will terminate and all 
+cluster data will be lost. To create durable recovery points please refer
+ to the [Persistent Storage](#persiststorage) section._
+
+The container runs the web application available for http (80) and http (443). 
 Since CycleCloud is running a JVM, the HeapSize of the JVM and the
 memory allocated to the container should be coordinate.  We recommend setting
 HeapSize to 1/2 the container memory allocation.  This can be done with the
@@ -65,10 +66,13 @@ Location="westus2"
 CIName="ci-name"
 CIDNSName="ci-name"
 
-az container create -g ${ResourceGroup} --location ${Location} \
-  --name ${CIName} --dns-name-label ${CIDNSName} \
+az container create -g ${ResourceGroup} \
+  --location ${Location} \
+  --name ${CIName} \
+  --dns-name-label ${CIDNSName} \
   --image mcr.microsoft.com/hpc/azure-cyclecloud \
-  --ip-address public --ports 80 443 \
+  --ip-address public \
+  --ports 80 443 \
   --cpu 2 --memory 4 \
   -e JAVA_HEAP_SIZE=2048
 ```
@@ -76,25 +80,25 @@ az container create -g ${ResourceGroup} --location ${Location} \
 This command will launch the container and the cyclecloud UI will be available
 at: `https://${CIDNSName}.${Location}.azurecontainer.io`.
 
-You can optionally add an additional environment variable for the 
-fully qualified domain name, in which case CycleCloud will try to 
-create valid SSL certificates:
+You can optionally add an additional environment variable for the
+fully qualified domain name, in which case CycleCloud will try to
+create valid a SSL certificate:
 
 ```bash
 FQDN="https://${CIDNSName}.${Location}.azurecontainer.io"
 ...
--e JAVA_HEAP_SIZE=2048 FQDN=${FQDN} 
+-e JAVA_HEAP_SIZE=2048 FQDN=${FQDN}
 ```
 
 ### Recover the SSH keypair
 
-CycleCloud creates a keypair to be used for administrative access to nodes.  This keypair will be printed to the stdout of the container image and should be retained.  In the Azure Container Instance this is in the _Container_ menu under the _Logs_ tab.
+CycleCloud creates a keypair to be used for administrative access to nodes.  This keypair will be printed to the stdout of the container image and should be retained.
 
 A unique ssh keypair for the container appear in the standard output of
 the container process.  As the message indicates, retain this keypair for
-admin access to the CycleCloud clusters.
+admin access to the CycleCloud clusters. In the Azure Container Instance this is in the _Container_ menu under the _Logs_ tab.
 
-```
+```text
 Private Key for admin access to nodes.  Retain for cyclecloud cli and ssh access.
 -----BEGIN RSA PRIVATE KEY-----
 MIIJKAIBAAKCAgEAhdhrHdfirGEEsps2R+EZP5Zq/2TLA/JQPNYwFtcTvA0cJ3O0
@@ -110,6 +114,7 @@ mVa3tFI9HfSz2qjsB1YLRfZYiMR+BzCI9uOyu9bIu2VLUX1fjgIDJ6XYtcOQAJP0
 ```
 
 ### Autoconfig
+
 To bring up an Azure CycleCloud container with a user pre-created, add the
 following environment variables to the docker run command:
 
@@ -118,10 +123,49 @@ following environment variables to the docker run command:
     -e CYCLECLOUD_AUTOCONFIG=true \
     -e CYCLECLOUD_USERNAME=$YOUR-USER-NAME \
     -e CYCLECLOUD_PASSWORD=$PASSWORD \
-    -e CYCLECLOUD_USER_PUB_KEY=$SSH_PUBLIC_KEY
-    mcr.microsoft.com/hpc/azure-cyclecloud 
-    ```
+    -e CYCLECLOUD_USER_PUB_KEY=$SSH_PUBLIC_KEY \
+    mcr.microsoft.com/hpc/azure-cyclecloud
 
 With this, all clusters nodes started will have this user created and the SSH
 public key staged in their authorized_keys file. You can also login to the
 CycleCloud web interface using the username and password as credentials.
+
+### <a name="persiststorage"></a>Persistent Storage
+
+Retaining data from Azure CycleCloud can be important.  Should the Azure Container 
+Instance fail data could be completely lost making it impossible to recover the
+managed running state of HPC clusters.  It's strongly advised to configure the
+Azure Container Instance to be backed with durable storage from [Azure File Share](https://docs.microsoft.com/en-us/azure/storage/files/storage-how-to-create-file-share).
+
+Azure CycleCloud container will use durable storage for:
+
+- Logs
+- Backup Recovery Points
+
+Provided that an Azure File Share is mounted at the following location:
+- /azurecyclecloud
+
+For a better understanding of setting up Azure File Share, please see the 
+documentation demonstrating the [integration with Azure Container Instance](https://docs.microsoft.com/en-us/azure/container-instances/container-instances-volume-azure-files). 
+
+```bash
+az container create \
+  --resource-group ${ResourceGroup} \
+  --location ${Location} \
+  --name ${Name} \
+  --dns-name-label ${DNSName} \
+  --image mcr.microsoft.com/hpc/azure-cyclecloud \
+  --ip-address public \
+  --ports 80 443 \
+  --cpu 2 \
+  --memory 4 \
+  -e JAVA_HEAP_SIZE=2048 \
+  --azure-file-volume-account-name ${STORAGE_ACCOUNT_NAME} \
+  --azure-file-volume-account-key ${STORAGE_KEY} \
+  --azure-file-volume-share-name ${SHARE_NAME} \
+  --azure-file-volume-mount-path /azurecyclecloud
+```
+
+Using the above example, a storage share will be mounted at `/azurecyclecloud` and will collect logs and backup points. In this configuration
+the Azure CycleCloud data can be recovered from failure or used to
+migrate to hosting in another service, such as Virtual Machine.
