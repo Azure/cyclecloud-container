@@ -37,7 +37,7 @@ fi
 
 CYCLECLOUD_AUTOCONFIG=$(echo $CYCLECLOUD_AUTOCONFIG | tr '[:upper:]' '[:lower:]')
 
-if [ $CYCLECLOUD_AUTOCONFIG = "true" ];then
+if [ "$CYCLECLOUD_AUTOCONFIG" = "true" ];then
     if [ -z $CYCLECLOUD_USERNAME ] || [ -z $CYCLECLOUD_PASSWORD ] || [ -z $CYCLECLOUD_USER_PUB_KEY ];then
         print STDERR "ERROR: CYCLECLOUD_AUTOCONFIG is set to true, but CYCLECLOUD_USERNAME, CYCLECLOUD_PASSWORD or CYCLECLOUD_USER_PUB_KEY is not defined"
         exit 1

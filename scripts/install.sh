@@ -2,8 +2,10 @@
 set -x
 
 for filename in cyclecloud*amd64.deb; do
-    apt install ./${filename}
+    dpkg --force-all -i ./${filename} 
 done
+
+echo '/usr/local/openjdk-8' > /opt/cycle_server/config/java_home
 
 # Copy components
 if [ $(ls -A components/)i ]; then
