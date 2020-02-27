@@ -19,6 +19,15 @@ if [ $(ls -A records/) ]; then
     mv records/* $CS_ROOT/records/
 fi  
 
+cat << EOF > $CS_ROOT/config/data/distro-method-container.txt
+AdType = "Application.Setting"
+Name = "distribution_method"
+Category = "system"
+Status = "internal"
+Value = "container"
+Description = "CycleCloud distribution method e.g. marketplace, container, manual."
+EOF
+
 # Update properties
 
 sed -i 's/webServerMaxHeapSize\=2048M/webServerMaxHeapSize\=4096M/' $CS_ROOT/config/cycle_server.properties
@@ -29,3 +38,8 @@ sed -i 's/webServerEnableHttps\=false/webServerEnableHttps=true/' $CS_ROOT/confi
 ls -l $CS_ROOT/components
 # Clenaup install dir
 rm -rf pwd
+
+$CS_ROOT/cycle_server start 
+$CS_ROOT/cycle_server await_startup
+$CS_ROOT/cycle_server execute 'update Application.Setting set Value = undefined where Name == "site_id" || Name == "reported_version"'
+service cycle_server stop
