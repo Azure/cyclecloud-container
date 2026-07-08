@@ -32,11 +32,13 @@ def _catch_sys_error(cmd_list):
     """Execute a system command and catch errors."""
     try:
         output = check_output(cmd_list)
-        print(cmd_list)
+        safe_cmd = [c if '--password' not in c else '--password=***' for c in cmd_list]
+        print(safe_cmd)
         print(output)
         return output
     except CalledProcessError as e:
-        print("Error with cmd: %s" % e.cmd)
+        safe_cmd = [c if '--password' not in c else '--password=***' for c in e.cmd]
+        print("Error with cmd: %s" % safe_cmd)
         print("Output: %s" % e.output)
         raise
 
@@ -270,7 +272,8 @@ def main():
 
     args = parser.parse_args()
 
-    print("Account setup arguments: %s" % args)
+    safe_args = {k: ('***' if k == 'password' else v) for k, v in vars(args).items()}
+    print("Account setup arguments: %s" % safe_args)
 
     try:
         cyclecloud_account_setup(args.username, args.password, args.webServerSslPort,

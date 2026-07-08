@@ -29,11 +29,26 @@ docker build -t cyclecloud:latest .
 
 ### Minimum Docker Example
 
+Using host networking (simplest, exposes all CycleCloud ports directly):
+
+```bash
+docker run -it \
+  --name cyclecloud \
+  --network host \
+  -e CYCLECLOUD_PASSWORD="MySecurePassword123!" \
+  -e CYCLECLOUD_USERNAME="ccadmin" \
+  cyclecloud:latest
+```
+
+Using port mapping (maps to less commonly used host ports to avoid conflicts in WSL):
+
 ```bash
 docker run -it \
   --name cyclecloud \
   -e CYCLECLOUD_PASSWORD="MySecurePassword123!" \
   -e CYCLECLOUD_USERNAME="ccadmin" \
+  -p 9080:8080 \
+  -p 9443:8443 \
   cyclecloud:latest
 ```
 
@@ -303,6 +318,92 @@ docker run -e NO_DEFAULT_ACCOUNT=true cyclecloud:latest
 ```
 
 (Useful for CycleCloud instances that manage other subscriptions)
+
+### Post-Install Account Setup (`cyclecloud_account.py`)
+
+The `cyclecloud_account.py` script initializes the CycleCloud CLI and creates the default Azure account **after** CycleCloud is running. It is not called automatically by the container entrypoint — use it manually via `kubectl exec` or as an init/sidecar step once CycleCloud has started and is healthy.
+
+**Prerequisites**: CycleCloud must be running and responding on the HTTPS port (check the readiness probe at `https://localhost:8443/health_monitor`).
+
+#### Usage via `docker exec`
+
+```bash
+docker exec -it cyclecloud python3 /cs-install/scripts/cyclecloud_account.py \
+  --username="ccadmin" \
+  --password="MySecurePassword123!" \
+  --useManagedIdentity \
+  --storageAccount="mystorageaccount" \
+  --storageManagedIdentity="/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<name>" \
+  --resourceGroup="my-cluster-rg"
+```
+
+#### Usage via `kubectl exec`
+
+```bash
+kubectl exec -it <cyclecloud-pod> -- python3 /cs-install/scripts/cyclecloud_account.py \
+  --username="ccadmin" \
+  --password="<password>" \
+  --useManagedIdentity \
+  --storageAccount="mystorageaccount" \
+  --storageManagedIdentity="/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<name>" \
+  --resourceGroup="my-cluster-rg"
+```
+
+#### With Workload Identity
+
+```bash
+kubectl exec -it <cyclecloud-pod> -- python3 /cs-install/scripts/cyclecloud_account.py \
+  --username="ccadmin" \
+  --password="<password>" \
+  --useWorkloadIdentity \
+  --storageAccount="mystorageaccount" \
+  --resourceGroup="my-cluster-rg"
+```
+
+#### With Entra ID
+
+```bash
+kubectl exec -it <cyclecloud-pod> -- python3 /cs-install/scripts/cyclecloud_account.py \
+  --entraEnabled \
+  --entraObjectId="<object-id>" \
+  --useWorkloadIdentity \
+  --storageAccount="mystorageaccount" \
+  --resourceGroup="my-cluster-rg"
+```
+
+#### All Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--username` | `cc_admin` | CycleCloud admin username |
+| `--password` | `""` | Admin password (if empty, resets password via `cycle_server reset_access`) |
+| `--tenantId` | — | Azure AD tenant ID |
+| `--useManagedIdentity` | `false` | Use Managed Identity for Azure account |
+| `--useWorkloadIdentity` | `false` | Use Workload Identity for Azure account |
+| `--webServerSslPort` | `8443` | CycleCloud HTTPS port (for CLI initialization) |
+| `--entraEnabled` | `false` | Use Entra ID authentication for CLI init |
+| `--entraObjectId` | — | Entra object ID (required with `--entraEnabled`) |
+| `--noDefaultAccount` | `false` | Skip Azure account creation (only initialize CLI) |
+| `--azureSovereignCloud` | `public` | Azure cloud environment (`public`, `china`, `germany`, `usgov`) |
+| `--applicationId` | — | Service Principal application ID (if not using MI/WI) |
+| `--applicationSecret` | — | Service Principal secret (if not using MI/WI) |
+| `--storageAccount` | — | Storage account name for CycleCloud locker |
+| `--storageManagedIdentity` | — | Fully qualified resource ID of the Managed Identity for storage access (e.g., `/subscriptions/{subId}/resourceGroups/{rg}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{name}`). If provided, locker uses MI auth; otherwise uses SharedAccessKey |
+| `--resourceGroup` | (from IMDS) | Resource group name for cluster resources |
+| `--dryrun` | `false` | Test mode — skips IMDS and uses dummy metadata |
+
+#### How location and locker identity are resolved
+
+- **Location**: Automatically fetched from IMDS (`169.254.169.254`). The account uses the same Azure region as the VM/pod running CycleCloud. There is no CLI override.
+- **Subscription ID**: Automatically fetched from IMDS.
+- **Resource Group**: Defaults to the VM's resource group if `--resourceGroup` is not specified.
+- **Locker auth**: If `--storageManagedIdentity` is provided, the locker authenticates to storage using that Managed Identity (requires `Storage Blob Data Contributor` role on the storage account). Must be the fully qualified resource ID, e.g., `/subscriptions/{subId}/resourceGroups/{rg}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{name}`. If omitted, it falls back to SharedAccessKey.
+
+#### What it does
+
+1. **Initializes the CycleCloud CLI** — authenticates against the local CycleCloud server using password, Workload Identity, or Managed Identity
+2. **Fetches VM/pod metadata from IMDS** — retrieves subscription ID, location, and resource group
+3. **Creates the default Azure account** — registers an Azure provider account in CycleCloud with the specified storage and identity configuration
 
 ## Acceptance Criteria (Implementation Status)
 

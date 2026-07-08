@@ -289,7 +289,8 @@ def main():
 
     args = parser.parse_args()
 
-    print("Configuration arguments: %s" % args)
+    safe_args = {k: ('***' if k == 'password' else v) for k, v in vars(args).items()}
+    print("Configuration arguments: %s" % safe_args)
 
     try:
         if args.generateCsConfig:
