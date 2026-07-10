@@ -61,21 +61,18 @@ def reset_cyclecloud_pw(username):
     return pw
 
 
-def setup_local_account(admin_user, password, webserver_port):
-    """Initialize CLI for the local admin account (CC must be running)."""
+def initialize_cli_with_local_account(admin_user, webserver_port):
+    """Initialize the CycleCloud CLI."""
+    print("Initializing CycleCloud CLI")
     cyclecloud_admin_pw = ""
-    if password:
-        cyclecloud_admin_pw = password
+    if os.path.exists(os.path.expanduser("~/.ssh/pw")):
+        with open(os.path.expanduser("~/.ssh/pw"), "r") as f:
+            cyclecloud_admin_pw = f.read().strip()
     else:
         # Password was generated pre-start; reset to get a new one from CC
         cyclecloud_admin_pw = reset_cyclecloud_pw(admin_user)
-
-    initialize_cyclecloud_cli(admin_user, cyclecloud_admin_pw, webserver_port)
-
-
-def initialize_cyclecloud_cli(admin_user, cyclecloud_admin_pw, webserver_port):
-    """Initialize the CycleCloud CLI."""
-    print("Initializing CycleCloud CLI")
+        with open(os.path.expanduser("~/.ssh/pw"), "w") as f:
+            f.write(cyclecloud_admin_pw)
     password_flag = ("--password=%s" % cyclecloud_admin_pw)
     _catch_sys_error(["/usr/local/bin/cyclecloud", "initialize", "--loglevel=debug", "--batch", "--force",
                       "--url=https://localhost:{}".format(webserver_port),
@@ -113,52 +110,32 @@ def initialize_cli_with_managed_identity(webserver_port, tenant_id, entra_object
 
 
 def get_workload_identity():
-    """Validate that required workload identity environment variables are set."""
+    """Check if workload identity exists."""
     required_vars = ["AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "AZURE_CLIENT_ID"]
     missing = [v for v in required_vars if v not in os.environ]
-    if missing:
-        print("Missing environment variables for workload identity: {}".format(", ".join(missing)))
-        raise KeyError("Required workload identity env vars not set: {}".format(missing))
-    print("Workload Identity exists")
+    if not missing:
+        print("Workload Identity exists")
+        return True
+    else:
+        return False
 
 
 def get_vm_metadata():
     """Fetch VM metadata from IMDS with retries."""
     metadata_url = "http://169.254.169.254/metadata/instance?api-version=2017-08-01"
     metadata_req = Request(metadata_url, headers={"Metadata": "true"})
-
-    for attempt in range(30):
-        print("Fetching metadata (attempt {}/30)".format(attempt + 1))
-        try:
-            metadata_response = urlopen(metadata_req, timeout=2)
-            return json.load(metadata_response)
-        except ValueError as e:
-            print("Failed to get metadata: %s" % e)
-            print("Retrying...")
-            sleep(2)
-            continue
-        except Exception as e:
-            print("Error fetching metadata: %s" % e)
-            print("Retrying...")
-            sleep(2)
-            continue
-
-    print("ERROR: IMDS endpoint unreachable — container requires Azure identity")
-    raise Exception("ERROR: IMDS endpoint unreachable — container requires Azure identity")
+    try:
+        metadata_response = urlopen(metadata_req, timeout=2)
+        return json.load(metadata_response)
+    except (ValueError, Exception) as e:
+        print("Error fetching metadata: %s" % e)
+        return {}
 
 
-def create_azure_account(vm_metadata, use_managed_identity, use_workload_identity, tenant_id, application_id,
+
+def create_azure_account( subscription_id, location, use_managed_identity, use_workload_identity, tenant_id, application_id,
                          application_secret, azure_cloud, storageAccount, storage_managed_identity, resource_group=None):
     """Create the default Azure account using CycleCloud CLI (requires CC running)."""
-    subscription_id = vm_metadata["compute"]["subscriptionId"]
-    location = vm_metadata["compute"]["location"]
-    metadata_rg = vm_metadata["compute"]["resourceGroupName"]
-
-    if resource_group:
-        print("CycleCloud created in resource group: %s" % metadata_rg)
-        print("Cluster resources will be created in resource group: %s" % resource_group)
-    else:
-        resource_group = metadata_rg
 
     random_suffix = ''.join(random.SystemRandom().choice(ascii_lowercase) for _ in range(14))
 
@@ -203,19 +180,19 @@ def create_azure_account(vm_metadata, use_managed_identity, use_workload_identit
     _catch_sys_error(["/usr/local/bin/cyclecloud", "account", "create", "-f", account_file])
 
 
-def cyclecloud_account_setup(admin_user, password, webserver_port, use_managed_identity, use_workload_identity,
+def cyclecloud_account_setup(admin_user, webserver_port, use_managed_identity, use_workload_identity,
                              tenant_id, entra_enabled=False, entra_object_id=None,
                              no_default_account=False, azure_cloud="public", application_id=None,
                              application_secret=None, storageAccount=None, storage_managed_identity=None,
-                             resource_group=None, dryrun=False):
+                             resource_group=None, subscription_id=None, location=None, dryrun=False):
     """Initialize CycleCloud CLI and create Azure account (requires CC to be running)."""
     print("Initializing cyclecloud CLI")
 
-    if use_workload_identity:
-        get_workload_identity()
+    if get_workload_identity():
+        use_workload_identity = True
 
     if not entra_enabled:
-        setup_local_account(admin_user, password, webserver_port)
+        initialize_cli_with_local_account(admin_user, webserver_port)
     else:
         print("Entra is enabled.")
         if use_workload_identity:
@@ -228,20 +205,26 @@ def cyclecloud_account_setup(admin_user, password, webserver_port, use_managed_i
             raise ValueError("Entra is enabled but neither workload identity nor managed identity is configured. "
                              "Please enable --useWorkloadIdentity or --useManagedIdentity.")
 
-    if not no_default_account:
-        if not dryrun:
-            vm_metadata = get_vm_metadata()
-        else:
-            vm_metadata = {
-                "compute": {
-                    "subscriptionId": "1234-50-679890",
-                    "location": "dryrun",
-                    "resourceGroupName": "dryrun-rg"
-                }
+    if not dryrun:
+        vm_metadata = get_vm_metadata()
+    else:
+        vm_metadata = {
+            "compute": {
+                "subscriptionId": "1234-50-679890",
+                "location": "dryrun",
+                "resourceGroupName": "dryrun-rg"
             }
-        create_azure_account(vm_metadata, use_managed_identity, use_workload_identity, tenant_id,
-                             application_id, application_secret, azure_cloud, storageAccount,
-                             storage_managed_identity, resource_group)
+        }
+    if not subscription_id:
+        subscription_id = vm_metadata.get("compute", {}).get("subscriptionId")
+    if not location:
+        location = vm_metadata.get("compute", {}).get("location")
+    if not resource_group:
+        resource_group = vm_metadata.get("compute", {}).get("resourceGroupName")
+        
+    create_azure_account(subscription_id, location, use_managed_identity, use_workload_identity, tenant_id,
+                            application_id, application_secret, azure_cloud, storageAccount,
+                            storage_managed_identity, resource_group)
 
 
 def main():
@@ -250,8 +233,7 @@ def main():
 
     parser.add_argument("--tenantId", dest="tenantId", help="Tenant ID of the Azure subscription")
     parser.add_argument("--username", dest="username", default="cc_admin", help="The local admin user for CycleCloud")
-    parser.add_argument("--password", dest="password", default="", help="The password for the CycleCloud UI user")
-    parser.add_argument("--useManagedIdentity", dest="useManagedIdentity", action="store_true",
+    parser.add_argument("--useManagedIdentity", dest="useManagedIdentity", default="true", action="store_true",
                         help="Use Managed Identity rather than a Service Principal")
     parser.add_argument("--useWorkloadIdentity", dest="useWorkloadIdentity", action="store_true",
                         help="Use Workload Identity rather than a Service Principal")
@@ -269,20 +251,19 @@ def main():
                         help="Managed Identity for storage access")
     parser.add_argument("--resourceGroup", dest="resourceGroup", help="The resource group for CycleCloud cluster resources")
     parser.add_argument("--dryrun", dest="dryrun", action="store_true", help="Dry run mode for testing")
+    parser.add_argument("--subscriptionId", dest="subscriptionId", help="Azure subscription ID")
+    parser.add_argument("--location", dest="location", help="Azure location")
 
     args = parser.parse_args()
-
-    safe_args = {k: ('***' if k == 'password' else v) for k, v in vars(args).items()}
-    print("Account setup arguments: %s" % safe_args)
-
+    
     try:
-        cyclecloud_account_setup(args.username, args.password, args.webServerSslPort,
+        cyclecloud_account_setup(args.username, args.webServerSslPort,
                                  args.useManagedIdentity, args.useWorkloadIdentity, args.tenantId,
                                  args.entraEnabled, args.entraObjectId,
                                  args.noDefaultAccount, args.azureSovereignCloud,
                                  args.applicationId, args.applicationSecret,
                                  args.storageAccount, args.storageManagedIdentity,
-                                 args.resourceGroup, args.dryrun)
+                                 args.resourceGroup, args.subscriptionId, args.location, args.dryrun)
     finally:
         clean_up()
 

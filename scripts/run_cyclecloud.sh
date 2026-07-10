@@ -6,9 +6,8 @@ CS_ROOT="/opt/cycle_server"
 # ============================================================================
 # Set defaults for all environment variables
 # ============================================================================
-USE_WORKLOAD_IDENTITY="${USE_WORKLOAD_IDENTITY:-false}"
 CYCLECLOUD_USERNAME="${CYCLECLOUD_USERNAME:-ccadmin}"
-CYCLECLOUD_PASSWORD="${CYCLECLOUD_PASSWORD:-CHANGEME}"
+CYCLECLOUD_PASSWORD="${CYCLECLOUD_PASSWORD:-}"
 CYCLECLOUD_USER_PUBKEY="${CYCLECLOUD_USER_PUBKEY:-}"
 CYCLECLOUD_STORAGE="${CYCLECLOUD_STORAGE:-}"
 CYCLECLOUD_RESOURCE_GROUP="${CYCLECLOUD_RESOURCE_GROUP:-}"
@@ -33,16 +32,17 @@ ENTRA_AUTH_ENDPOINT="${ENTRA_AUTH_ENDPOINT:-}"
 ENTRA_USERNAME="${ENTRA_USERNAME:-}"
 ENTRA_UID="${ENTRA_UID:-}"
 
-# ============================================================================
-# FAIL-CLOSED SECURITY GATE: Check for default password
-# ============================================================================
-if [[ "${CYCLECLOUD_PASSWORD}" == "CHANGEME" ]] && [[ "${CONTAINER_DEBUG}" != "true" ]]; then
-    echo "ERROR: CYCLECLOUD_PASSWORD must be changed before running in production. Set CYCLECLOUD_PASSWORD via secret or use CONTAINER_DEBUG=true for testing."
-    exit 1
-fi
 
 # ============================================================================
-# Initialize persistent volume on first start
+# Initialize or update persistent volume
+#
+# Case 1: First start with a NEW/EMPTY data volume mount
+#   - No master.logfile exists, so we initialize the volume from the
+#     container stash (includes data and work directories).
+#
+# Case 2: After an UPGRADE with an existing data volume
+#   - The work volume may not include the NEW Jetpack shipped in this
+#     container image, so we copy it in from the container stash.
 # ============================================================================
 if [ ! -f "${CS_ROOT}/data/ads/master.logfile" ]; then
     echo "Initializing persistent volume from stashed CycleCloud data..."
@@ -53,13 +53,12 @@ if [ ! -f "${CS_ROOT}/data/ads/master.logfile" ]; then
     popd
 fi
 
-# ============================================================================
-# Copy stashed work directory (preserves jetpack/project versions)
-# ============================================================================
+# Ensure work directory exists and copy latest jetpack/project versions from stash
 if [ ! -d "${CS_ROOT}/work" ]; then
     mkdir -p ${CS_ROOT}/work
 fi
 if [ -d "/opt_cycle_server/work" ]; then
+    echo "Updating work directory with latest Jetpack from container stash..."
     cp -a /opt_cycle_server/work/* ${CS_ROOT}/work/ || true
 fi
 

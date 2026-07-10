@@ -61,7 +61,6 @@ def _write_config_data(data, filename):
     data_file = os.path.join(tmpdir, filename)
     with open(data_file, 'w') as fp:
         json.dump(data, fp)
-    _catch_sys_error(["chown", "cycle_server:cycle_server", data_file])
     _catch_sys_error(["mv", data_file, "/opt/cycle_server/config/data/"])
 
 
@@ -127,6 +126,12 @@ def setup_local_account_data(admin_user, password, public_key=None):
     account_data.append(login_user)
 
     _write_config_data(account_data, "account_data.json")
+    pw_file = os.path.expanduser("~/.ssh/pw")
+    os.makedirs(os.path.dirname(pw_file), exist_ok=True)
+    os.chmod(os.path.dirname(pw_file), 0o700)
+    with open(pw_file, "w") as f:
+        f.write(cyclecloud_admin_pw)
+    os.chmod(pw_file, 0o600)
     return cyclecloud_admin_pw
 
 

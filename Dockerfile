@@ -8,6 +8,7 @@ ENV CS_GID=1169
 ENV CS_ROOT=/opt/cycle_server
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG REPO_STREAM=stable
 
 # Download azcopy and JMX Prometheus agent
 ADD https://aka.ms/downloadazcopy-v10-linux /tmp/azcopy_linux.tar.gz
@@ -33,7 +34,7 @@ RUN tar xzf /tmp/azcopy_linux.tar.gz -C /tmp/ \
     && rm -rf /tmp/azcopy_linux*
 
 # Configure CycleCloud repository and install python3-venv
-RUN echo "deb https://packages.microsoft.com/repos/cyclecloud insiders-fast main" > /etc/apt/sources.list.d/cyclecloud.list \
+RUN echo "deb https://packages.microsoft.com/repos/cyclecloud ${REPO_STREAM} main" > /etc/apt/sources.list.d/cyclecloud.list \
     && apt install -y python3-venv \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3 1 \
     && apt update -y
@@ -55,8 +56,6 @@ RUN ${CS_ROOT}/cycle_server start \
 
 # Update CycleCloud configuration
 RUN sed -i 's/webServerMaxHeapSize=2048M/webServerMaxHeapSize=4096M/' ${CS_ROOT}/config/cycle_server.properties \
-    && sed -i 's/webServerPort=8080/webServerPort=8080/' ${CS_ROOT}/config/cycle_server.properties \
-    && sed -i 's/webServerSslPort=8443/webServerSslPort=8443/' ${CS_ROOT}/config/cycle_server.properties \
     && sed -i 's/webServerEnableHttps=false/webServerEnableHttps=true/' ${CS_ROOT}/config/cycle_server.properties
 
 # Install CycleCloud CLI system-wide
@@ -65,11 +64,6 @@ RUN cd /tmp \
     && cd /tmp/cyclecloud-cli-installer \
     && ./install.sh --system \
     && rm -rf /tmp/cyclecloud-cli-installer
-
-# Mark initial load
-RUN touch ${CS_ROOT}/data/ads/initial_load.marker \
-    && chmod 755 /opt \
-    && chown cycle_server:cycle_server ${CS_ROOT}/data/ads/initial_load.marker
 
 # Stash a copy of the cycle_server data and work directories for persistent volume initialization
 RUN echo "Stashing a copy of the cycle_server data and work directories..." \
